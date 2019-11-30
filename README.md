@@ -1,6 +1,6 @@
 # Wiki Fake
 
-Fake wikipedia sentences.
+**Learning project**: This GAN aims to fake Wikipedia sentences.
 
 ## Setup
 
@@ -13,5 +13,14 @@ pip install -r requirements.txt
 ## Crawl data
 
 ```zsh
-scrapy crawl wiki -o data/sentences.csv
+(cd wiki_crawler; scrapy crawl wiki -o data/sentences.pickle )
+./preprocess.py -i data/sentences.pickle -o data/processed.pickle
+```
+
+You might have to interrupt the crawling (*Ctrl+c*) when you don't want to download all Wikipedia sites.
+
+## Training
+
+```zsh
+./gan.py -i data/processed.pickle
 ```

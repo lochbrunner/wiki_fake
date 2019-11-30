@@ -3,10 +3,13 @@
 import argparse
 import pickle
 
+import numpy as np
+
 import torch
 import torch.optim as optim
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.nn.utils.rnn as rnn
 from torch.nn.parameter import Parameter
 from torch.utils.data import Dataset, DataLoader
 
@@ -16,15 +19,45 @@ def load_data(filename):
         return pickle.load(file)
 
 
+def memoize(function):
+    memo = {}
+
+    def wrapper(*args):
+        if args in memo:
+            return memo[args]
+        else:
+            rv = function(*args)
+            memo[args] = rv
+            return rv
+    return wrapper
+
+
+class Padder:
+    def __init__(self, max_length, pad_token):
+        self.max_length = max_length
+        self.pad_token = pad_token
+
+    def __call__(self, x):
+        l = len(x)
+        padded_x = np.ones((self.max_length))*self.pad_token
+        padded_x[0:len(x)] = x
+
+        x = torch.as_tensor(padded_x, dtype=torch.long)
+        # print(f'x: {x.size()}')
+        return x, l
+
+
 class WikiDataset(Dataset):
-    def __init__(self, sentences):
-        self.sentences = sentences
+    def __init__(self, data, transform):
+        self.sentences = data['sentences']
+        self.transform = transform
 
     def __len__(self):
         return len(self.sentences)
 
+    # @memoize
     def __getitem__(self, index):
-        return torch.as_tensor(self.sentences[index])
+        return self.transform(self.sentences[index])
 
 
 def to_words(mapping, sentence: torch.Tensor):
@@ -47,25 +80,28 @@ class Discriminator(nn.Module):
         self.embedding = Parameter(torch.Tensor(
             vocab_size, embedding_size))
 
-        self.lstm = nn.LSTM(embedding_size, hidden_size)
+        self.lstm = nn.LSTM(embedding_size, hidden_size, batch_first=True)
         self.out = nn.Linear(hidden_size, 1)
 
-    def _forward_impl(self, x):
+    def _forward_impl(self, x, l):
+        x = rnn.pack_padded_sequence(
+            x, l, batch_first=True, enforce_sorted=False)
         x, _ = self.lstm(x)
+        x, _ = rnn.pad_packed_sequence(x, batch_first=True)
         x = F.relu(x)
         x = self.out(x)
         x = torch.sigmoid(x)
-        return x[-1]
+        return x[:, -1].squeeze()
 
-    def forward(self, x):
+    def forward(self, x, l):
         x = F.embedding(x, self.embedding, self.pad_token)
-        x = x[:, None]
-        return self._forward_impl(x)
+        # x = x[:, None]
+        return self._forward_impl(x, l)
 
-    def forward_digit(self, x):
+    def forward_digit(self, x, l):
         x = torch.matmul(x, self.embedding)
-        x = x[:, None]
-        return self._forward_impl(x)
+        # x = x[:, None]
+        return self._forward_impl(x, l)
 
 
 class Generator(nn.Module):
@@ -88,62 +124,64 @@ class Generator(nn.Module):
 
 
 def main(database):
+    pad_token = 0
     data = load_data(database)
     mapping = data['mapping']
     max_length = data['max_length']
-    sentences = data['sentences']
-    dataset = WikiDataset(sentences)
-    # dataloader = DataLoader(dataset, batch_size=32,
-    #                         shuffle=True, num_workers=0)
+    batch_size = 32
+    dataset = WikiDataset(data, Padder(max_length, pad_token))
+    dataloader = DataLoader(dataset, batch_size=batch_size,
+                            shuffle=True, num_workers=0)
 
     latent_size = 10
     generator = Generator(len(mapping), max_length, latent_size)
     discriminator = Discriminator(len(mapping))
 
     # Training setup
-    real_label = torch.as_tensor([1], dtype=float).float()
-    fake_label = torch.as_tensor([0], dtype=float).float()
+    real_label = torch.as_tensor([1], dtype=torch.float).float()
+    fake_label = torch.as_tensor([0], dtype=torch.float).float()
 
     criterion = nn.BCELoss()
 
     discriminator_optim = optim.SGD(discriminator.parameters(), lr=0.01)
     generator_optim = optim.SGD(generator.parameters(), lr=0.01)
+    fake_l = torch.tensor([max_length], dtype=torch.long)
 
-    for epoch in range(50):
-        # Discriminator with real
-        discriminator_optim.zero_grad()
-        real = dataset[epoch]
-        judge = discriminator(real).view(-1)
-        err_dis_real = criterion(judge, real_label)
-        err_dis_real.backward()
-        reals_count = judge.mean().item()
-        print(f'{reals_count*100:.3f}% of real images are judged as real')
+    for epoch in range(1):
+        for real, l in dataloader:
+            # Discriminator with real
+            discriminator_optim.zero_grad()
+            judge = discriminator(real, l).view(-1)
+            # print(f'judge: {judge.size()}')
+            err_dis_real = criterion(judge, real_label.expand(batch_size))
+            err_dis_real.backward()
+            reals_count = judge.mean().item()
 
-        # Discriminator with fakes
-        z = torch.randn(latent_size)
-        fake = generator(z)
-        judge = discriminator.forward_digit(fake.detach()).view(-1)
-        fakes_count = judge.mean().item()
-        print(f'{fakes_count*100:.3f}% of fake images are judged as real')
-        err_dis_fake = criterion(judge, fake_label)
-        err_dis_fake.backward()
-        discriminator_optim.step()
+            # Discriminator with fakes
+            z = torch.randn(latent_size)
+            fake = generator(z).unsqueeze(0)
+            judge = discriminator.forward_digit(fake.detach(), fake_l).view(-1)
+            fakes_count = judge.mean().item()
+            err_dis_fake = criterion(judge, fake_label)
+            err_dis_fake.backward()
+            discriminator_optim.step()
 
-        # Update creator
-        generator_optim.zero_grad()
-        judge = discriminator.forward_digit(fake).view(-1)
-        err_dis_fake = criterion(judge, real_label)
-        err_dis_fake.backward()
-        print(f'loss G&D: {err_dis_fake.item()}')
-        generator_optim.step()
+            # Update creator
+            generator_optim.zero_grad()
+            judge = discriminator.forward_digit(fake, fake_l).view(-1)
+            err_dis_fake = criterion(judge, real_label)
+            err_dis_fake.backward()
+            print(
+                f'real: {reals_count*100:.3f}% - fake: {fakes_count*100:.3f}%  loss G&D: {err_dis_fake.item():.3f}')
+            generator_optim.step()
 
     z = torch.randn(latent_size)
-    fake = generator(z)
-    judge = discriminator.forward_digit(fake.detach()).view(-1)
+    fake = generator(z).unsqueeze(0)
+    judge = discriminator.forward_digit(fake.detach(), fake_l).view(-1)
     fakes_count = judge.mean().item()
     print(f'{fakes_count*100:.3f}% of fake images are judged as real')
     err_dis_fake = criterion(judge, fake_label)
-    print(f'Fake: "{to_words(mapping, fake)}"')
+    print(f'Fake: "{to_words(mapping, fake.squeeze())}"')
 
 
 if __name__ == '__main__':

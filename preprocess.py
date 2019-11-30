@@ -43,6 +43,8 @@ def main(input_filename, output_filename):
             max_length = len(words)
             longest_sentence = ' '.join(words)
         words = list(clean(words))
+        if len(words) == 0:
+            continue
         for word in words:
             if word not in mapping:
                 mapping[word] = len(mapping)
