@@ -1,10 +1,11 @@
 
 import scrapy
 import html2text
+import re
 
 
-def invalid(s):
-    return '(' in s or ')' in s or '[' in s or ']' in s or '/' in s
+def is_valid(s):
+    return re.search(r'^[\w\s,.]+$', s) is not None
 
 
 class QuotesSpider(scrapy.Spider):
@@ -21,12 +22,10 @@ class QuotesSpider(scrapy.Spider):
         paragraphs = response.css('#bodyContent p').getall()
 
         for paragraph in paragraphs:
-            for sentence in self.converter.handle(paragraph).split('. '):
+            for sentence in self.converter.handle(paragraph).split('.'):
                 if len(sentence) > 0:
-                    if invalid(sentence):
-                        continue
-
-                    yield {'sentence': sentence.replace('\n', ' ')}
+                    if is_valid(sentence):
+                        yield {'sentence': sentence.replace('\n', ' ')}
 
         links = response.css('#bodyContent a::attr(href)').getall()
         for link in links:

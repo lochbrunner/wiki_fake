@@ -1,4 +1,5 @@
-pylint
-pep8
-scrapy
 html2text
+pep8
+pylint
+scrapy
+torch
