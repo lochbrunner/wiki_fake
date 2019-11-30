@@ -95,12 +95,10 @@ class Discriminator(nn.Module):
 
     def forward(self, x, l):
         x = F.embedding(x, self.embedding, self.pad_token)
-        # x = x[:, None]
         return self._forward_impl(x, l)
 
     def forward_digit(self, x, l):
         x = torch.matmul(x, self.embedding)
-        # x = x[:, None]
         return self._forward_impl(x, l)
 
 
@@ -111,14 +109,21 @@ class Generator(nn.Module):
         # pad_token = 0
         self.max_length = max_length
 
-        self.lstm = nn.LSTM(latent_size, embedding_size)
+        self.lstm = nn.LSTM(latent_size, embedding_size,
+                            num_layers=2, batch_first=True)
         self.to_out = nn.Linear(embedding_size, vocab_size)
 
-    def forward(self, z):
-        z = z[None, :].expand(self.max_length, -1)[:, None]
+    def forward(self, z, l):
+        z = z[:, None, :]
+
+        z = z.expand(-1, self.max_length, -1)
         # seq_len x batch x input_size
+        z = rnn.pack_padded_sequence(
+            z, l, batch_first=True, enforce_sorted=False)
         y, _ = self.lstm(z)
+        y, _ = rnn.pad_packed_sequence(y, batch_first=True)
         y = self.to_out(y)
+
         y = torch.squeeze(y)
         return F.softmax(y, dim=1)
 
@@ -147,7 +152,14 @@ def main(database):
     generator_optim = optim.SGD(generator.parameters(), lr=0.01)
     fake_l = torch.tensor([max_length], dtype=torch.long)
 
-    for epoch in range(1):
+    def print_fake():
+        z = torch.randn(1, latent_size)
+        fake = generator(z, fake_l)
+        judge = discriminator.forward_digit(
+            fake.detach().unsqueeze(0), fake_l).view(-1)
+        print(f'Fake: "{to_words(mapping, fake.squeeze())}"')
+
+    for epoch in range(30):
         for real, l in dataloader:
             # Discriminator with real
             discriminator_optim.zero_grad()
@@ -158,8 +170,8 @@ def main(database):
             reals_count = judge.mean().item()
 
             # Discriminator with fakes
-            z = torch.randn(latent_size)
-            fake = generator(z).unsqueeze(0)
+            z = torch.randn(batch_size, latent_size)
+            fake = generator(z, fake_l.expand(batch_size))
             judge = discriminator.forward_digit(fake.detach(), fake_l).view(-1)
             fakes_count = judge.mean().item()
             err_dis_fake = criterion(judge, fake_label)
@@ -175,13 +187,19 @@ def main(database):
                 f'real: {reals_count*100:.3f}% - fake: {fakes_count*100:.3f}%  loss G&D: {err_dis_fake.item():.3f}')
             generator_optim.step()
 
-    z = torch.randn(latent_size)
-    fake = generator(z).unsqueeze(0)
-    judge = discriminator.forward_digit(fake.detach(), fake_l).view(-1)
-    fakes_count = judge.mean().item()
-    print(f'{fakes_count*100:.3f}% of fake images are judged as real')
-    err_dis_fake = criterion(judge, fake_label)
-    print(f'Fake: "{to_words(mapping, fake.squeeze())}"')
+        print_fake()
+
+    print_fake()
+    print_fake()
+    print_fake()
+
+    torch.save({
+        'epoch': 30,
+        'generator_model_state_dict': generator.state_dict(),
+        'generator_optim': generator_optim.state_dict(),
+        'discriminator_model_state_dict': discriminator.state_dict(),
+        'discriminator_optim': discriminator_optim.state_dict()
+    }, 'data/snapshot.pickle')
 
 
 if __name__ == '__main__':
