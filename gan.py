@@ -61,7 +61,7 @@ class WikiDataset(Dataset):
         return self.transform(self.sentences[index])
 
 
-def reconstruct_sentence(mapping, sentence: torch.Tensor):
+def reconstruct_sentence(mapping, sentence: torch.Tensor, display_repeatings=True):
     mapping = {v: k for k, v in mapping.items()}
     result = ''
     last_word_i = -1
@@ -73,7 +73,7 @@ def reconstruct_sentence(mapping, sentence: torch.Tensor):
         if i == last_word_i:
             last_word_count += 1
             continue
-        if last_word_count > 1:
+        if last_word_count > 1 and display_repeatings:
             result += f'({last_word_count})'
         last_word_count = 0
         last_word_i = i
@@ -84,8 +84,8 @@ def reconstruct_sentence(mapping, sentence: torch.Tensor):
 class Discriminator(nn.Module):
     def __init__(self, vocab_size):
         super(Discriminator, self).__init__()
-        embedding_size = 64
-        hidden_size = 64
+        embedding_size = 128
+        hidden_size = 128
         self.pad_token = 0
         self.embedding = Parameter(torch.Tensor(
             vocab_size, embedding_size))
@@ -98,7 +98,7 @@ class Discriminator(nn.Module):
             x, l, batch_first=True, enforce_sorted=False)
         x, _ = self.lstm(x)
         x, _ = rnn.pad_packed_sequence(x, batch_first=True)
-        x = F.relu(x)
+        x = F.leaky_relu(x, 0.2)
         x = self.out(x)
         x = torch.sigmoid(x)
         return x[:, -1].squeeze()
@@ -120,8 +120,8 @@ class Generator(nn.Module):
         self.max_length = max_length
 
         self.lstm = nn.LSTM(latent_size, embedding_size,
-                            num_layers=3, batch_first=True)
-        self.to_out = nn.Linear(embedding_size, vocab_size)
+                            num_layers=3, batch_first=True, bidirectional=True)
+        self.to_out = nn.Linear(embedding_size*2, vocab_size)
 
     def forward(self, z, l):
         z = z[:, None, :]
@@ -132,6 +132,7 @@ class Generator(nn.Module):
             z, l, batch_first=True, enforce_sorted=False)
         y, _ = self.lstm(z)
         y, _ = rnn.pad_packed_sequence(y, batch_first=True)
+        y = F.leaky_relu(y, 0.2)
         y = self.to_out(y)
 
         y = torch.squeeze(y)
@@ -162,18 +163,16 @@ def main(database):
 
     criterion = nn.BCELoss()
 
-    discriminator_optim = optim.SGD(discriminator.parameters(), lr=0.01)
-    generator_optim = optim.SGD(generator.parameters(), lr=0.01)
+    discriminator_optim = optim.SGD(discriminator.parameters(), lr=0.002)
+    generator_optim = optim.Adam(generator.parameters(), lr=0.002)
     fake_l = torch.tensor([max_length], dtype=torch.long).to(device)
 
     def print_fake():
         z = torch.randn(1, latent_size).to(device)
         fake = generator(z, fake_l)
-        judge = discriminator.forward_digit(
-            fake.detach().unsqueeze(0), fake_l).view(-1)
         print(f'Fake: "{reconstruct_sentence(mapping, fake.squeeze())}"')
 
-    for epoch in range(100):
+    for epoch in range(1):
         epoch_reals_count = 0.0
         epoch_fakes_count = 0.0
         epoche_dis_loss = 0.0
@@ -214,7 +213,7 @@ def main(database):
         dis_loss = epoche_dis_loss / epoch_i
         gen_dis_loss = epoche_gen_dis_loss / epoch_i
         print(
-            f'real: {reals_count*100:.3f}% - fake: {fakes_count*100:.3f}%  loss D: {dis_loss:.3f} G+D: {gen_dis_loss:.3f}')
+            f'real: {reals_count*100:.3f}% - fake: {fakes_count*100:.3f}%  loss D: {dis_loss:.3f} G: {gen_dis_loss:.3f}')
         print_fake()
 
     print_fake()
@@ -223,6 +222,7 @@ def main(database):
 
     torch.save({
         'epoch': 30,
+        'latent_size': latent_size,
         'generator_model_state_dict': generator.state_dict(),
         'generator_optim': generator_optim.state_dict(),
         'discriminator_model_state_dict': discriminator.state_dict(),

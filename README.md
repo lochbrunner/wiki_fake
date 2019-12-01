@@ -24,3 +24,7 @@ You might have to interrupt the crawling (*Ctrl+c*) when you don't want to downl
 ```zsh
 ./gan.py -i data/processed.pickle
 ```
+
+Example
+
+> genaue gruppenkommandanten studiert kontextdefinition abstrakt konsequenzoperation mehrsprachig
