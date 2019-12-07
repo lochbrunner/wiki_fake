@@ -22,9 +22,16 @@ You might have to interrupt the crawling (*Ctrl+c*) when you don't want to downl
 ## Training
 
 ```zsh
-./gan.py -i data/processed.pickle
+./gan.py -i data/processed.pickle -m data/snapshot.pickle
 ```
 
 Example
 
 > genaue gruppenkommandanten studiert kontextdefinition abstrakt konsequenzoperation mehrsprachig
+
+
+## Visualization
+
+```zsh
+./visu.py -i data/processed.pickle -m data/snapshot.pickle
+```

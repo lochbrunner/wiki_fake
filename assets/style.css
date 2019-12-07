@@ -23,3 +23,11 @@ body {
   width: calc(100% - 150px);
   margin-left: 10px;
 }
+
+#validated-input span {
+  margin: 0 2px;
+}
+
+#validated-input span.in-valid {
+  color: #800;
+}

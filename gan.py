@@ -139,7 +139,7 @@ class Generator(nn.Module):
         return F.softmax(y, dim=1)
 
 
-def main(database):
+def main(database, model_filename):
     use_cuda = torch.cuda.is_available() and True
     device = torch.device('cuda:0' if use_cuda else 'cpu')
     pad_token = 0
@@ -227,11 +227,13 @@ def main(database):
         'generator_optim': generator_optim.state_dict(),
         'discriminator_model_state_dict': discriminator.state_dict(),
         'discriminator_optim': discriminator_optim.state_dict()
-    }, 'data/snapshot.pickle')
+    }, model_filename)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='wiki gan')
     parser.add_argument('-i', '--input-filename', type=str, required=True)
+    parser.add_argument('-m', '--model-filename', type=str,
+                        default='data/snapshot.pickle')
     args = parser.parse_args()
     main(args.input_filename)
