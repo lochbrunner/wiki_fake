@@ -13,6 +13,8 @@ import torch.nn.utils.rnn as rnn
 from torch.nn.parameter import Parameter
 from torch.utils.data import Dataset, DataLoader
 
+from common import clearProgressBar, printProgressBar
+
 
 def load_data(filename):
     with open(filename, 'rb') as file:
@@ -139,7 +141,7 @@ class Generator(nn.Module):
         return F.softmax(y, dim=1)
 
 
-def main(database, model_filename):
+def main(database, model_filename, max_epochs):
     use_cuda = torch.cuda.is_available() and True
     device = torch.device('cuda:0' if use_cuda else 'cpu')
     pad_token = 0
@@ -149,7 +151,7 @@ def main(database, model_filename):
     batch_size = 32
     dataset = WikiDataset(data, Padder(max_length, pad_token, device))
     dataloader = DataLoader(dataset, batch_size=batch_size,
-                            shuffle=True, num_workers=0)
+                            shuffle=True, num_workers=0, drop_last=True)
 
     latent_size = 10
     generator = Generator(len(mapping), max_length, latent_size)
@@ -172,13 +174,13 @@ def main(database, model_filename):
         fake = generator(z, fake_l)
         print(f'Fake: "{reconstruct_sentence(mapping, fake.squeeze())}"')
 
-    for epoch in range(1):
+    for epoch in range(max_epochs):
         epoch_reals_count = 0.0
         epoch_fakes_count = 0.0
         epoche_dis_loss = 0.0
         epoche_gen_dis_loss = 0.0
         epoch_i = 0.0
-        for real, l in dataloader:
+        for i, (real, l) in enumerate(dataloader):
             # Discriminator with real
             discriminator_optim.zero_grad()
             judge = discriminator(real, l).view(-1)
@@ -208,20 +210,21 @@ def main(database, model_filename):
             epoch_reals_count += reals_count
             epoch_i += 1.0
 
+            printProgressBar(epoch*len(dataloader)+i,
+                             len(dataloader)*max_epochs)
+
         reals_count = epoch_reals_count / epoch_i
         fakes_count = epoch_fakes_count / epoch_i
         dis_loss = epoche_dis_loss / epoch_i
         gen_dis_loss = epoche_gen_dis_loss / epoch_i
+        clearProgressBar()
         print(
             f'real: {reals_count*100:.3f}% - fake: {fakes_count*100:.3f}%  loss D: {dis_loss:.3f} G: {gen_dis_loss:.3f}')
-        print_fake()
-
-    print_fake()
-    print_fake()
-    print_fake()
+        printProgressBar((1+epoch)*len(dataloader), len(dataloader)*max_epochs)
+        # print_fake()
 
     torch.save({
-        'epoch': 30,
+        'epoch': max_epochs,
         'latent_size': latent_size,
         'generator_model_state_dict': generator.state_dict(),
         'generator_optim': generator_optim.state_dict(),
@@ -235,5 +238,6 @@ if __name__ == '__main__':
     parser.add_argument('-i', '--input-filename', type=str, required=True)
     parser.add_argument('-m', '--model-filename', type=str,
                         default='data/snapshot.pickle')
+    parser.add_argument('-e', '--epochs', type=int, default=30)
     args = parser.parse_args()
-    main(args.input_filename)
+    main(args.input_filename, args.model_filename, args.epochs)

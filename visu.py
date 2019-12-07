@@ -161,7 +161,6 @@ def create_app():
         x = torch.as_tensor(padded_x, dtype=torch.long).to(device).unsqueeze(0)
         l = torch.as_tensor([len(words)], dtype=torch.long).to(
             device)
-        print(f'l: {l.size()}')
         judge = discriminator(x, l).view(-1).item()
         return [html.Span(f'{judge*100:.3f}%')]
 
