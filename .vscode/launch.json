@@ -24,7 +24,9 @@
             "program": "${workspaceFolder}/gan.py",
             "args": [
                 "-i",
-                "data/processed.small.pickle",
+                "data/processed.2.pickle",
+                "-m",
+                "data/snapshot.3.pickle"
             ],
             "console": "integratedTerminal",
             "justMyCode": false

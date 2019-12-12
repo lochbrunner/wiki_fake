@@ -164,6 +164,7 @@ def main(database, model_filename, max_epochs):
     fake_label = torch.as_tensor([0], dtype=torch.float).to(device)
 
     criterion = nn.BCELoss()
+    l1_crit = nn.L1Loss(size_average=False)
 
     discriminator_optim = optim.SGD(discriminator.parameters(), lr=0.002)
     generator_optim = optim.Adam(generator.parameters(), lr=0.002)
@@ -177,8 +178,8 @@ def main(database, model_filename, max_epochs):
     for epoch in range(max_epochs):
         epoch_reals_count = 0.0
         epoch_fakes_count = 0.0
-        epoche_dis_loss = 0.0
-        epoche_gen_dis_loss = 0.0
+        epoch_dis_loss = 0.0
+        epoch_gen_dis_loss = 0.0
         epoch_i = 0.0
         for i, (real, l) in enumerate(dataloader):
             # Discriminator with real
@@ -194,6 +195,8 @@ def main(database, model_filename, max_epochs):
             judge = discriminator.forward_digit(fake.detach(), fake_l).view(-1)
             fakes_count = judge.mean().item()
             dis_loss = criterion(judge, fake_label)
+            dis_loss += 0.1*l1_crit(discriminator.out.bias,
+                                    torch.zeros(discriminator.out.bias.size()).to(device))
             dis_loss.backward()
             discriminator_optim.step()
 
@@ -204,8 +207,8 @@ def main(database, model_filename, max_epochs):
             gen_dis_loss.backward()
             generator_optim.step()
             # stats
-            epoche_dis_loss += dis_loss.item()
-            epoche_gen_dis_loss += gen_dis_loss.item()
+            epoch_dis_loss += dis_loss.item()
+            epoch_gen_dis_loss += gen_dis_loss.item()
             epoch_fakes_count += fakes_count
             epoch_reals_count += reals_count
             epoch_i += 1.0
@@ -215,13 +218,13 @@ def main(database, model_filename, max_epochs):
 
         reals_count = epoch_reals_count / epoch_i
         fakes_count = epoch_fakes_count / epoch_i
-        dis_loss = epoche_dis_loss / epoch_i
-        gen_dis_loss = epoche_gen_dis_loss / epoch_i
+        dis_loss = epoch_dis_loss / epoch_i
+        gen_dis_loss = epoch_gen_dis_loss / epoch_i
         clearProgressBar()
         print(
             f'real: {reals_count*100:.3f}% - fake: {fakes_count*100:.3f}%  loss D: {dis_loss:.3f} G: {gen_dis_loss:.3f}')
         printProgressBar((1+epoch)*len(dataloader), len(dataloader)*max_epochs)
-        # print_fake()
+    print_fake()
 
     torch.save({
         'epoch': max_epochs,

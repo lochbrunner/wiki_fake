@@ -35,3 +35,8 @@ Example
 ```zsh
 ./visu.py -i data/processed.pickle -m data/snapshot.pickle
 ```
+
+## TODO
+
+* Use [sacremoses](https://github.com/alvations/sacremoses) as tokenizer
+  
